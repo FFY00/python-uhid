@@ -9,6 +9,8 @@ import uuid
 
 from typing import Optional, Sequence
 
+import caio
+
 
 BUS_PCI = 0x01
 BUS_ISAPNP = 0x02
@@ -173,18 +175,20 @@ class UHID(object):
         self._uhid = os.open('/dev/uhid', os.O_RDWR)
         self._open = False
 
+        self._ctx = caio.AsyncioContext()
+
         self.__logger = logging.getLogger(self.__class__.__name__)
 
-    def _send_event(self, event_type: _EventType, data: ctypes.Structure) -> None:
+    async def _send_event(self, event_type: _EventType, data: ctypes.Structure) -> None:
         data_union = _U(**{event_type.name.strip('UHID_').lower(): data})
         event = _Event(event_type.value, data_union)
 
-        n = os.write(self._uhid, bytearray(event))
+        n = await self._ctx.write(bytes(data), self._uhid, offset=0)
 
         if n != ctypes.sizeof(event):
             raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
 
-    def create(
+    async def create(
         self,
         name: str,
         phys: str,
@@ -213,7 +217,7 @@ class UHID(object):
         if len(rd_data) > _Create2Req.rd_data.size:
             raise UHIDException(f'UHID_CREATE2: rd_data is too big ({len(rd_data) > _Create2Req.rd_data.size})')
 
-        self._send_event(_EventType.UHID_CREATE2, _Create2Req(
+        await self._send_event(_EventType.UHID_CREATE2, _Create2Req(
             name.encode(),
             phys.encode(),
             uniq.encode(),
@@ -229,6 +233,12 @@ class UHID(object):
 
 
 class UHIDDevice(object):
+    @classmethod
+    async def initialize(cls, *args, **kwargs) -> 'UHIDDevice':
+        device = cls(*args, **kwargs)
+        await device.create()
+        return device
+
     def __init__(
         self,
         vid: int,
@@ -258,8 +268,6 @@ class UHIDDevice(object):
         self.__logger = logging.getLogger(self.__class__.__name__)
 
         self._uhid = UHID()
-
-        self._initialize()
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
@@ -303,19 +311,9 @@ class UHIDDevice(object):
     def country(self) -> int:
         return self._country
 
-    def _initialize(self) -> None:
-        '''
-        Initializes the device
-
-        Subclasses can overwrite this method. There are several use cases for that,
-        eg. delay initialization, custom initialization, etc.
-        '''
-        self.__logger.info('initializing device')
-        self._create()
-
-    def _create(self) -> None:
+    async def create(self) -> None:
         self.__logger.info(f'create {self}')
-        self._uhid.create(
+        await self._uhid.create(
             self._name,
             self._phys,
             self._uniq,
