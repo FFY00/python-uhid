@@ -171,6 +171,7 @@ class UHID(object):
             raise RuntimeError('UHID is not available (/dev/uhid is missing)')
 
         self._uhid = os.open('/dev/uhid', os.O_RDWR)
+        self._open = False
 
         self.__logger = logging.getLogger(self.__class__.__name__)
 
@@ -195,6 +196,9 @@ class UHID(object):
         country: int,
         rd_data: Sequence[int]
     ) -> None:
+        if self._open:
+            raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
+
         self.__logger.info('UHID_CREATE2')
 
         if len(name) > _Create2Req.name.size:
@@ -221,6 +225,7 @@ class UHID(object):
             country,
             (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
         ))
+        self._open = True
 
 
 class UHIDDevice(object):
