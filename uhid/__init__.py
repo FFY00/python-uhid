@@ -10,15 +10,17 @@ import uuid
 from typing import Optional, Sequence
 
 
-BUS_PCI = 0x01
-BUS_ISAPNP = 0x02
-BUS_USB = 0x03
-BUS_HIL = 0x04
-BUS_BLUETOOTH = 0x05
-BUS_VIRTUAL = 0x06
-
 _HID_MAX_DESCRIPTOR_SIZE = 4096
 _UHID_DATA_MAX = 4096
+
+
+class Bus(enum.Enum):
+    PCI = 0x01
+    ISAPNP = 0x02
+    USB = 0x03
+    HIL = 0x04
+    BLUETOOTH = 0x05
+    VIRTUAL = 0x06
 
 
 class _EventType(enum.Enum):
@@ -236,7 +238,7 @@ class UHIDDevice(object):
         name: str,
         report_descriptor: Sequence[int],
         *,
-        bus: int = BUS_USB,
+        bus: Bus = Bus.USB,
         physical_name: str = '',
         unique_name: Optional[str] = None,
         version: int = 0,
@@ -265,7 +267,7 @@ class UHIDDevice(object):
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
 
     @property
-    def bus(self) -> int:
+    def bus(self) -> Bus:
         return self._bus
 
     @property
@@ -319,7 +321,7 @@ class UHIDDevice(object):
             self._name,
             self._phys,
             self._uniq,
-            self._bus,
+            self._bus.value,
             self._vid,
             self._pid,
             self._version,
