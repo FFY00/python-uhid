@@ -169,7 +169,7 @@ class UHID(object):
     '''
 
     def __init__(self) -> None:
-        if not os.path.exists('/dev/uhid'):
+        if not os.path.exists('/dev/uhid'):  # pragma: no cover
             raise RuntimeError('UHID is not available (/dev/uhid is missing)')
 
         self._uhid = os.open('/dev/uhid', os.O_RDWR)
@@ -183,7 +183,7 @@ class UHID(object):
 
         n = os.write(self._uhid, bytearray(event))
 
-        if n != ctypes.sizeof(event):
+        if n != ctypes.sizeof(event):  # pragma: no cover
             raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
 
     def create(
@@ -239,13 +239,16 @@ class UHIDDevice(object):
         report_descriptor: Sequence[int],
         *,
         bus: Bus = Bus.USB,
-        physical_name: str = '',
+        physical_name: Optional[str] = None,
         unique_name: Optional[str] = None,
         version: int = 0,
         country: int = 0,
     ) -> None:
         if not unique_name:
             unique_name = f'{self.__class__.__name__}_{uuid.uuid4()}'
+
+        if not physical_name:
+            physical_name = f'{self.__class__.__name__}/{unique_name}'
 
         self._bus = bus
         self._vid = vid

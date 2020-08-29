@@ -11,7 +11,7 @@ nox.options.reuse_existing_virtualenvs = True
 def mypy(session):
     session.install('.', 'mypy')
 
-    session.run('mypy', '-p', 'uhid')
+    session.run('mypy', 'src/uhid')
 
 
 @nox.session(python=['3.6', '3.7', '3.8'])
