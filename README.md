@@ -3,4 +3,4 @@
 Pure Python typed UHID wrapper
 
 UHID is a Linux API to create virtual HID devices.
-See the [official documentation](https://www.kernel.org/doc/Documentation/hid/uhid.txt).
+See the [official UHID documentation](https://www.kernel.org/doc/Documentation/hid/uhid.txt).
