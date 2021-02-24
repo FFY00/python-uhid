@@ -326,10 +326,10 @@ class _UHIDDeviceBase(object):
         country: int = 0,
     ) -> None:
         if not unique_name:
-            unique_name = f'{self.__class__.__name__}_{uuid.uuid4()}'
+            unique_name = f'{self.__class__.__name__}_{uuid.uuid4()}'[:63]
 
         if not physical_name:
-            physical_name = f'{self.__class__.__name__}/{unique_name}'
+            physical_name = f'{self.__class__.__name__}/{unique_name}'[:63]
 
         self._bus = bus
         self._vid = vid
