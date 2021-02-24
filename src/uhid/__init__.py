@@ -249,7 +249,6 @@ class _BlockingUHIDBase(_UHIDBase):
         self.__logger = logging.getLogger(self.__class__.__name__)
 
         self._uhid = os.open('/dev/uhid', os.O_RDWR)
-        self._open = False
 
     def _write(self, event: _Event) -> None:
         n = os.write(self._uhid, bytearray(event))
