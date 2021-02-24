@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import asyncio
 import ctypes
 import enum
@@ -8,9 +10,14 @@ import logging
 import os
 import os.path
 import select
+import typing
 import uuid
 
 from typing import Any, Callable, List, Optional, Sequence, Type, Union
+
+
+if typing.TYPE_CHECKING:
+    import trio
 
 
 _HID_MAX_DESCRIPTOR_SIZE = 4096
@@ -311,10 +318,39 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
             self._writer_registered = True
 
 
+class TrioUHID(_UHIDBase):
+    '''
+    Trio UHID implementation
+    '''
+
+    def __init__(self, file: trio._AsyncRawIOBase) -> None:
+        super().__init__()
+        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._uhid = file
+
+    @classmethod
+    async def new(cls) -> TrioUHID:
+        '''
+        Async initializer
+        '''
+        import trio
+
+        return cls(await trio.open_file('/dev/uhid', 'rb+', buffering=0))
+
+    async def _write(self, event: _Event) -> None:
+        await self._uhid.write(bytearray(event))
+
+    async def _read(self) -> None:
+        self._receive_dispatch(await self._uhid.read(ctypes.sizeof(_Event)))
+
+    async def send_event(self, event_type: _EventType, *args: Any, **kwargs: Any) -> None:
+        await self._write(self._construct_event[event_type](*args, **kwargs))
+
+
 class _UHIDDeviceBase(object):
     def __init__(
         self,
-        uhid_backend: _BlockingUHIDBase,
+        uhid_backend: _UHIDBase,
         vid: int,
         pid: int,
         name: str,
@@ -343,8 +379,8 @@ class _UHIDDeviceBase(object):
 
         self.__logger = logging.getLogger(self.__class__.__name__)
 
-        self._uhid = uhid_backend
-        self._uhid.receive = self._receive
+        self._backend = uhid_backend
+        self._backend.receive = self._receive
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
@@ -411,8 +447,11 @@ class UHIDDevice(_UHIDDeviceBase):
         country: int = 0,
         backend: Type[Union[PolledBlockingUHID, AsyncioBlockingUHID]] = PolledBlockingUHID,
     ) -> None:
-        super().__init__(backend(), vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
+        uhid = backend()
+        super().__init__(uhid, vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
         self.__logger = logging.getLogger(self.__class__.__name__)
+
+        self._uhid = uhid
         self.initialize()
 
     def initialize(self) -> None:
@@ -428,6 +467,75 @@ class UHIDDevice(_UHIDDeviceBase):
     def _create(self) -> None:
         self.__logger.info(f'create {self}')
         self._uhid.send_event(
+            _EventType.UHID_CREATE2,
+            self._name,
+            self._phys,
+            self._uniq,
+            self._bus.value,
+            self._vid,
+            self._pid,
+            self._version,
+            self._country,
+            self._rdesc,
+        )
+
+
+class AsyncUHIDDevice(_UHIDDeviceBase):
+    '''
+    UHID device with an async API
+    '''
+
+    def __init__(
+        self,
+        backend: TrioUHID,
+        vid: int,
+        pid: int,
+        name: str,
+        report_descriptor: Sequence[int],
+        bus: Bus = Bus.USB,
+        physical_name: Optional[str] = None,
+        unique_name: Optional[str] = None,
+        version: int = 0,
+        country: int = 0,
+    ) -> None:
+        super().__init__(backend, vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
+        self.__logger = logging.getLogger(self.__class__.__name__)
+        self._uhid = backend
+
+    @classmethod
+    async def new(
+        cls,
+        vid: int,
+        pid: int,
+        name: str,
+        report_descriptor: Sequence[int],
+        *,
+        bus: Bus = Bus.USB,
+        physical_name: Optional[str] = None,
+        unique_name: Optional[str] = None,
+        version: int = 0,
+        country: int = 0,
+        backend: Type[TrioUHID],
+    ) -> AsyncUHIDDevice:
+        print('creating!')
+        device = cls(await backend.new(), vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
+        print('phys =', device.physical_name)
+        await device.initialize()
+        return device
+
+    async def initialize(self) -> None:
+        '''
+        Initializes the device
+
+        Subclasses can overwrite this method. There are several use cases for that,
+        eg. delay initialization, custom initialization, etc.
+        '''
+        self.__logger.info('initializing device')
+        await self._create()
+
+    async def _create(self) -> None:
+        self.__logger.info(f'create {self}')
+        await self._uhid.send_event(
             _EventType.UHID_CREATE2,
             self._name,
             self._phys,
