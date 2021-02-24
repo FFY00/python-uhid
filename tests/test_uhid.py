@@ -29,7 +29,6 @@ def test_create_polled_blocking(basic_mouse_rdesc):
     device = uhid.UHIDDevice(0x1234, 0x4321, 'Dummy Mouse', basic_mouse_rdesc, backend=uhid.PolledBlockingUHID)
 
     hidraw = find_hidraw(device)
-    print(hidraw)
 
     assert hidraw.info == (device.bus.value, device.vid, device.pid) == (uhid.Bus.USB.value, 0x1234, 0x4321)
     assert hidraw.name == device.name == 'Dummy Mouse'
@@ -47,7 +46,6 @@ async def test_create_asyncio_blocking(basic_mouse_rdesc):
     await asyncio.sleep(0.1)
 
     hidraw = find_hidraw(device)
-    print(hidraw)
 
     assert hidraw.info == (device.bus.value, device.vid, device.pid) == (uhid.Bus.USB.value, 0x1234, 0x4321)
     assert hidraw.name == device.name == 'Dummy Mouse'
