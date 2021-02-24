@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT
 
+import asyncio
 import ctypes
 import enum
+import fcntl
 import logging
 import os
 import os.path
+import select
 import uuid
 
-from typing import Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Type, Union
 
 
 _HID_MAX_DESCRIPTOR_SIZE = 4096
@@ -163,30 +166,34 @@ class UHIDException(Exception):
     '''
 
 
-class UHID(object):
+class _UHIDBase(object):
     '''
-    Low level UHID wrapper
+    UHID interface implementation base
+
+    Does not do IO, only constructs the events.
     '''
 
     def __init__(self) -> None:
         if not os.path.exists('/dev/uhid'):  # pragma: no cover
             raise RuntimeError('UHID is not available (/dev/uhid is missing)')
 
-        self._uhid = os.open('/dev/uhid', os.O_RDWR)
-        self._open = False
-
         self.__logger = logging.getLogger(self.__class__.__name__)
+        self.receive: Optional[Callable[[_Event], None]] = None
+        self._open = False
+        self._construct_event = {
+            _EventType.UHID_CREATE2: self._create_event,
+        }
 
-    def _send_event(self, event_type: _EventType, data: ctypes.Structure) -> None:
-        data_union = _U(**{event_type.name.strip('UHID_').lower(): data})
-        event = _Event(event_type.value, data_union)
+    def _receive_dispatch(self, buffer: bytes) -> None:
+        if self.receive:
+            self.receive(_Event.from_buffer_copy(buffer))
+            # TODO: set self._open
 
-        n = os.write(self._uhid, bytearray(event))
+    def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
+        data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
+        return _Event(event_type.value, data_union)
 
-        if n != ctypes.sizeof(event):  # pragma: no cover
-            raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
-
-    def create(
+    def _create_event(
         self,
         name: str,
         phys: str,
@@ -196,8 +203,8 @@ class UHID(object):
         product: int,
         version: int,
         country: int,
-        rd_data: Sequence[int]
-    ) -> None:
+        rd_data: Sequence[int],
+    ) -> _Event:
         if self._open:
             raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
 
@@ -215,29 +222,104 @@ class UHID(object):
         if len(rd_data) > _Create2Req.rd_data.size:
             raise UHIDException(f'UHID_CREATE2: rd_data is too big ({len(rd_data) > _Create2Req.rd_data.size})')
 
-        self._send_event(_EventType.UHID_CREATE2, _Create2Req(
-            name.encode(),
-            phys.encode(),
-            uniq.encode(),
-            len(rd_data),
-            bus,
-            vendor,
-            product,
-            version,
-            country,
-            (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
-        ))
-        self._open = True
+        return self._event(
+            _EventType.UHID_CREATE2,
+            _Create2Req(
+                name.encode(),
+                phys.encode(),
+                uniq.encode(),
+                len(rd_data),
+                bus,
+                vendor,
+                product,
+                version,
+                country,
+                (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
+            ),
+        )
 
 
-class UHIDDevice(object):
+class _BlockingUHIDBase(_UHIDBase):
+    '''
+    Base for blocking IO based UHID interface implementation
+    '''
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.__logger = logging.getLogger(self.__class__.__name__)
+
+        self._uhid = os.open('/dev/uhid', os.O_RDWR)
+        self._open = False
+
+    def _write(self, event: _Event) -> None:
+        n = os.write(self._uhid, bytearray(event))
+        if n != ctypes.sizeof(event):  # pragma: no cover
+            raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
+
+    def _read(self) -> None:
+        self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
+
+    def _send_event(self, event: _Event) -> None:
+        self._write(event)
+
+    def send_event(self, event_type: _EventType, *args: Any, **kwargs: Any) -> None:
+        self._send_event(self._construct_event[event_type](*args, **kwargs))
+
+
+class PolledBlockingUHID(_BlockingUHIDBase):
+    '''
+    Blocking IO UHID implementation using epoll
+    '''
+
+    def poll_loop(self) -> None:
+        poller = select.epoll()
+        poller.register(self._uhid, select.EPOLLIN)
+        while True:
+            for _fd, _event_type in poller.poll():
+                self._read()
+
+
+class AsyncioBlockingUHID(_BlockingUHIDBase):
+    '''
+    Blocking IO UHID implementation using AsyncIO readers and writers
+
+    AsyncIO will watch the UHID file descriptor and schedule read and write
+    tasks when it is ready for those operations.
+    '''
+
+    def __init__(self, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+        super().__init__()
+        self._loop = loop if loop else asyncio.get_event_loop()
+
+        fcntl.fcntl(self._uhid, fcntl.F_SETFL, os.O_NONBLOCK)
+
+        self._write_queue: List[_Event] = []
+
+        self._writer_registered = False
+        self._loop.add_reader(self._uhid, self._read)
+
+    def _async_writer(self) -> None:
+        self._write(self._write_queue.pop(0))
+        if not self._write_queue:
+            self._loop.remove_writer(self._uhid)
+            self._writer_registered = False
+
+    def _send_event(self, event: _Event) -> None:
+        # TODO: benchmark loop.add_writer vs plain write, I feel plain write should be faster in the UHID fd
+        self._write_queue.append(event)
+        if self._write_queue and not self._writer_registered:
+            self._loop.add_writer(self._uhid, self._async_writer)
+            self._writer_registered = True
+
+
+class _UHIDDeviceBase(object):
     def __init__(
         self,
+        uhid_backend: Type[_BlockingUHIDBase],
         vid: int,
         pid: int,
         name: str,
         report_descriptor: Sequence[int],
-        *,
         bus: Bus = Bus.USB,
         physical_name: Optional[str] = None,
         unique_name: Optional[str] = None,
@@ -262,12 +344,14 @@ class UHIDDevice(object):
 
         self.__logger = logging.getLogger(self.__class__.__name__)
 
-        self._uhid = UHID()
-
-        self._initialize()
+        self._uhid = uhid_backend()
+        self._uhid.receive = self._receive
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
+
+    def _receive(self, event: _Event) -> None:
+        self.__logger.debug(f'received {event}')
 
     @property
     def bus(self) -> Bus:
@@ -308,7 +392,31 @@ class UHIDDevice(object):
     def country(self) -> int:
         return self._country
 
-    def _initialize(self) -> None:
+
+class UHIDDevice(_UHIDDeviceBase):
+    '''
+    UHID device
+    '''
+
+    def __init__(
+        self,
+        vid: int,
+        pid: int,
+        name: str,
+        report_descriptor: Sequence[int],
+        *,
+        bus: Bus = Bus.USB,
+        physical_name: Optional[str] = None,
+        unique_name: Optional[str] = None,
+        version: int = 0,
+        country: int = 0,
+        backend: Type[Union[PolledBlockingUHID, AsyncioBlockingUHID]] = PolledBlockingUHID,
+    ) -> None:
+        super().__init__(backend, vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
+        self.__logger = logging.getLogger(self.__class__.__name__)
+        self.initialize()
+
+    def initialize(self) -> None:
         '''
         Initializes the device
 
@@ -320,7 +428,8 @@ class UHIDDevice(object):
 
     def _create(self) -> None:
         self.__logger.info(f'create {self}')
-        self._uhid.create(
+        self._uhid.send_event(
+            _EventType.UHID_CREATE2,
             self._name,
             self._phys,
             self._uniq,
@@ -329,5 +438,5 @@ class UHIDDevice(object):
             self._pid,
             self._version,
             self._country,
-            self._rdesc
+            self._rdesc,
         )
