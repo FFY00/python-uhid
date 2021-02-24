@@ -314,7 +314,7 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
 class _UHIDDeviceBase(object):
     def __init__(
         self,
-        uhid_backend: Type[_BlockingUHIDBase],
+        uhid_backend: _BlockingUHIDBase,
         vid: int,
         pid: int,
         name: str,
@@ -343,7 +343,7 @@ class _UHIDDeviceBase(object):
 
         self.__logger = logging.getLogger(self.__class__.__name__)
 
-        self._uhid = uhid_backend()
+        self._uhid = uhid_backend
         self._uhid.receive = self._receive
 
     def __repr__(self) -> str:
@@ -411,7 +411,7 @@ class UHIDDevice(_UHIDDeviceBase):
         country: int = 0,
         backend: Type[Union[PolledBlockingUHID, AsyncioBlockingUHID]] = PolledBlockingUHID,
     ) -> None:
-        super().__init__(backend, vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
+        super().__init__(backend(), vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.initialize()
 
