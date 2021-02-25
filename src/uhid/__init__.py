@@ -12,6 +12,7 @@ import logging
 import os
 import os.path
 import select
+import struct
 import time
 import typing
 import uuid
@@ -194,7 +195,7 @@ class _UHIDBase(object):
         self._created = False
         self._started = False
         self._open_count = 0
-        self._construct_event: Dict[_EventType, Callable[..., _Event]] = {
+        self._construct_event: Dict[_EventType, Callable[..., bytes]] = {
             _EventType.UHID_CREATE2: self._create_event,
             _EventType.UHID_DESTROY: self._destroy_event,
         }
@@ -205,38 +206,37 @@ class _UHIDBase(object):
         self.receive_output: Optional[Callable[[List[int], _ReportType], Optional[Awaitable[None]]]] = None
 
     def _receive_dispatch(self, buffer: bytes) -> Optional[Callable[[], Optional[Awaitable[None]]]]:
-        event = _Event.from_buffer_copy(buffer)
-        if event.type == _EventType.UHID_START.value:
+        event_type = struct.unpack_from('< L', buffer)[0]
+
+        if event_type == _EventType.UHID_START.value:
+            _, dev_flags = struct.unpack_from('< L Q', buffer)
             self.__logger.debug('device started')
             self._started = True
             if self.receive_start:
-                return functools.partial(self.receive_start, event.u.start.dev_flags)
-        elif event.type == _EventType.UHID_OPEN.value:
+                return functools.partial(self.receive_start, dev_flags)
+
+        elif event_type == _EventType.UHID_OPEN.value:
             self._open_count += 1
             self.__logger.debug(f'device was opened (it now has {self._open_count} open instances)')
             if self.receive_open:
                 return functools.partial(self.receive_open)
-        elif event.type == _EventType.UHID_CLOSE.value:
+
+        elif event_type == _EventType.UHID_CLOSE.value:
             self._open_count -= 1
             self.__logger.debug(f'device was closed (it now has {self._open_count} open instances)')
             if self.receive_close:
                 return functools.partial(self.receive_close)
-        elif event.type == _EventType.UHID_OUTPUT.value:
+
+        elif event_type == _EventType.UHID_OUTPUT.value:
             if self.receive_output:
+                _, data, size, rtype = struct.unpack_from('< L 4096s H B', buffer)
                 return functools.partial(
                     self.receive_output,
-                    list(event.u.output.data)[:event.u.output.size],
-                    _ReportType(event.u.output.rtype),
+                    list(data)[:size],
+                    _ReportType(rtype),
                 )
         # TODO: stop, get_report, set_report
         return None
-
-    def _event(self, event_type: _EventType, event_data: Optional[ctypes.Structure] = None) -> _Event:
-        if event_data:
-            data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
-        else:
-            data_union = _U()
-        return _Event(event_type.value, data_union)
 
     def _create_event(
         self,
@@ -249,7 +249,7 @@ class _UHIDBase(object):
         version: int,
         country: int,
         rd_data: Sequence[int],
-    ) -> _Event:
+    ) -> bytes:
         if self._created:
             raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
         self._created = True
@@ -266,25 +266,24 @@ class _UHIDBase(object):
         if len(rd_data) > _Create2Req.rd_data.size:
             raise UHIDException(f'UHID_CREATE2: rd_data is too big ({len(rd_data) > _Create2Req.rd_data.size})')
 
-        return self._event(
-            _EventType.UHID_CREATE2,
-            _Create2Req(
-                name.encode(),
-                phys.encode(),
-                uniq.encode(),
-                len(rd_data),
-                bus,
-                vendor,
-                product,
-                version,
-                country,
-                (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
-            ),
+        return struct.pack(
+            '< L 128s 64s 64s H H L L L L 4096s',
+            _EventType.UHID_CREATE2.value,
+            name.encode(),
+            phys.encode(),
+            uniq.encode(),
+            len(rd_data),
+            bus,
+            vendor,
+            product,
+            version,
+            country,
+            bytes(rd_data),
         )
 
-    def _destroy_event(self) -> _Event:
+    def _destroy_event(self) -> bytes:
         self._created = False
-        return self._event(_EventType.UHID_DESTROY)
+        return struct.pack('< L', _EventType.UHID_DESTROY.value)
 
     # TODO: input2, get_report_reply, set_report_reply
 
@@ -304,10 +303,10 @@ class _BlockingUHIDBase(_UHIDBase):
 
         self._uhid = os.open('/dev/uhid', os.O_RDWR)
 
-    def _write(self, event: _Event) -> None:
+    def _write(self, event: bytes) -> None:
         n = os.write(self._uhid, bytearray(event))
-        if n != ctypes.sizeof(event):  # pragma: no cover
-            raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
+        if n != len(event):  # pragma: no cover
+            raise UHIDException(f'Failed to send data ({n} != {len(event)})')
 
     def _read(self) -> None:
         callback = self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
@@ -316,7 +315,7 @@ class _BlockingUHIDBase(_UHIDBase):
                 raise TypeError(f'{self.__class__.__name__} does not support async callbacks (got {callback})')
             callback()
 
-    def _send_event(self, event: _Event) -> None:
+    def _send_event(self, event: bytes) -> None:
         self._write(event)
 
     def send_event(self, event_type: _EventType, *args: Any, **kwargs: Any) -> None:
@@ -353,7 +352,7 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
 
         fcntl.fcntl(self._uhid, fcntl.F_SETFL, os.O_NONBLOCK)
 
-        self._write_queue: List[_Event] = []
+        self._write_queue: List[bytes] = []
 
         self._writer_registered = False
         self._loop.add_reader(self._uhid, self._read)
@@ -364,7 +363,7 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
             self._loop.remove_writer(self._uhid)
             self._writer_registered = False
 
-    def _send_event(self, event: _Event) -> None:
+    def _send_event(self, event: bytes) -> None:
         # TODO: benchmark loop.add_writer vs plain write, I feel plain write should be faster in the UHID fd
         self._write_queue.append(event)
         if self._write_queue and not self._writer_registered:
@@ -391,8 +390,8 @@ class TrioUHID(_UHIDBase):
 
         return cls(await trio.open_file('/dev/uhid', 'rb+', buffering=0))
 
-    async def _write(self, event: _Event) -> None:
-        await self._uhid.write(bytearray(event))
+    async def _write(self, event: bytes) -> None:
+        await self._uhid.write(event)
 
     async def single_dispatch(self) -> None:
         callback = self._receive_dispatch(await self._uhid.read(ctypes.sizeof(_Event)))
