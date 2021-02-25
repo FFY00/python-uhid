@@ -188,11 +188,14 @@ class _UHIDBase(object):
         self.__logger = logging.getLogger(self.__class__.__name__)
         self._created = False
         self._started = False
+        self._open_count = 0
         self._construct_event = {
             _EventType.UHID_CREATE2: self._create_event,
         }
 
         self.receive_start: Optional[Callable[[int], None]] = None
+        self.receive_open: Optional[Callable[[], None]] = None
+        self.receive_close: Optional[Callable[[], None]] = None
 
     def _receive_dispatch(self, buffer: bytes) -> None:
         event = _Event.from_buffer_copy(buffer)
@@ -201,6 +204,16 @@ class _UHIDBase(object):
             self._started = True
             if self.receive_start:
                 self.receive_start(event.u.start.dev_flags)
+        elif event.type == _EventType.UHID_OPEN.value:
+            self._open_count += 1
+            self.__logger.debug(f'device was opened (it now has {self._open_count} open instances)')
+            if self.receive_open:
+                self.receive_open()
+        elif event.type == _EventType.UHID_CLOSE.value:
+            self._open_count -= 1
+            self.__logger.debug(f'device was closed (it now has {self._open_count} open instances)')
+            if self.receive_close:
+                self.receive_close()
 
     def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
         data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
@@ -397,11 +410,19 @@ class _UHIDDeviceBase(object):
 
         self._backend = uhid_backend
         self._backend.receive_start = self.receive_start
+        self._backend.receive_open = self.receive_open
+        self._backend.receive_close = self.receive_close
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
 
     def receive_start(self, dev_flags: int) -> None:
+        pass
+
+    def receive_open(self) -> None:
+        pass
+
+    def receive_close(self) -> None:
         pass
 
     @property
