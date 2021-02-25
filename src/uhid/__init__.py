@@ -26,7 +26,7 @@ if typing.TYPE_CHECKING:
     import trio  # pragma: no cover
 
 
-__version__ = '0.0.0b1'
+__version__ = '0.0.1'
 
 
 _HID_MAX_DESCRIPTOR_SIZE = 4096
