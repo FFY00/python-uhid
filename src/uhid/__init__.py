@@ -528,9 +528,7 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
         country: int = 0,
         backend: Type[TrioUHID],
     ) -> AsyncUHIDDevice:
-        print('creating!')
         device = cls(await backend.new(), vid, pid, name, report_descriptor, bus, physical_name, unique_name, version, country)
-        print('phys =', device.physical_name)
         await device.initialize()
         return device
 
