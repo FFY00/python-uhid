@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 import ioctl.hidraw
@@ -43,7 +42,7 @@ def test_create_polled_blocking(basic_mouse_rdesc):
 async def test_create_asyncio_blocking(basic_mouse_rdesc):
     device = uhid.UHIDDevice(0x1234, 0x4321, 'Dummy Mouse', basic_mouse_rdesc, backend=uhid.AsyncioBlockingUHID)
 
-    await asyncio.sleep(0.1)
+    await device.wait_for_start_asyncio()
 
     hidraw = find_hidraw(device)
 
