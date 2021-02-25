@@ -228,8 +228,11 @@ class _UHIDBase(object):
         # TODO: stop, get_report, set_report
         return None
 
-    def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
-        data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
+    def _event(self, event_type: _EventType, event_data: Optional[ctypes.Structure] = None) -> _Event:
+        if event_data:
+            data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
+        else:
+            data_union = _U()
         return _Event(event_type.value, data_union)
 
     def _create_event(
