@@ -20,6 +20,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Typ
 
 
 if typing.TYPE_CHECKING:
+    import threading  # pragma: no cover
+
     import trio  # pragma: no cover
 
 
@@ -329,10 +331,10 @@ class PolledBlockingUHID(_BlockingUHIDBase):
     def single_dispatch(self) -> None:
         self._read()
 
-    def dispatch(self) -> None:
+    def dispatch(self, stop: Optional[threading.Event] = None) -> None:
         poller = select.epoll()
         poller.register(self._uhid, select.EPOLLIN)
-        while True:
+        while not stop.is_set() if stop else True:
             for _fd, _event_type in poller.poll():
                 self.single_dispatch()
 
@@ -581,9 +583,9 @@ class UHIDDevice(_UHIDDeviceBase):
             self.single_dispatch()
             await asyncio.sleep(delay)
 
-    def dispatch(self) -> None:
+    def dispatch(self, stop: Optional[threading.Event] = None) -> None:
         if isinstance(self._uhid, PolledBlockingUHID):
-            self._uhid.dispatch()
+            self._uhid.dispatch(stop)
 
     def single_dispatch(self) -> None:
         if isinstance(self._uhid, PolledBlockingUHID):
