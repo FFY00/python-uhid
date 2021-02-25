@@ -6,6 +6,8 @@ import asyncio
 import ctypes
 import enum
 import fcntl
+import functools
+import inspect
 import logging
 import os
 import os.path
@@ -14,7 +16,7 @@ import time
 import typing
 import uuid
 
-from typing import Any, Callable, List, Optional, Sequence, Type, Union
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, Type, Union
 
 
 if typing.TYPE_CHECKING:
@@ -198,24 +200,25 @@ class _UHIDBase(object):
         self.receive_open: Optional[Callable[[], None]] = None
         self.receive_close: Optional[Callable[[], None]] = None
 
-    def _receive_dispatch(self, buffer: bytes) -> None:
+    def _receive_dispatch(self, buffer: bytes) -> Optional[Callable[[], Optional[Awaitable[None]]]]:
         event = _Event.from_buffer_copy(buffer)
         if event.type == _EventType.UHID_START.value:
             self.__logger.debug('device started')
             self._started = True
             if self.receive_start:
-                self.receive_start(event.u.start.dev_flags)
+                return functools.partial(self.receive_start, event.u.start.dev_flags)
         elif event.type == _EventType.UHID_OPEN.value:
             self._open_count += 1
             self.__logger.debug(f'device was opened (it now has {self._open_count} open instances)')
             if self.receive_open:
-                self.receive_open()
+                return functools.partial(self.receive_open)
         elif event.type == _EventType.UHID_CLOSE.value:
             self._open_count -= 1
             self.__logger.debug(f'device was closed (it now has {self._open_count} open instances)')
             if self.receive_close:
-                self.receive_close()
+                return functools.partial(self.receive_close)
         # TODO: stop, output, get_report, set_report
+        return None
 
     def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
         data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
@@ -289,7 +292,11 @@ class _BlockingUHIDBase(_UHIDBase):
             raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
 
     def _read(self) -> None:
-        self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
+        callback = self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
+        if callback:
+            if inspect.iscoroutinefunction(callback):
+                raise TypeError(f'{self.__class__.__name__} does not support async callbacks (got {callback})')
+            callback()
 
     def _send_event(self, event: _Event) -> None:
         self._write(event)
@@ -370,7 +377,13 @@ class TrioUHID(_UHIDBase):
         await self._uhid.write(bytearray(event))
 
     async def single_dispatch(self) -> None:
-        self._receive_dispatch(await self._uhid.read(ctypes.sizeof(_Event)))
+        callback = self._receive_dispatch(await self._uhid.read(ctypes.sizeof(_Event)))
+        if callback:
+            if inspect.iscoroutinefunction(callback):
+                async_callback = typing.cast(Callable[[], Awaitable[None]], callback)
+                await async_callback()
+            else:
+                callback()
 
     async def dispatch(self) -> None:
         while True:
