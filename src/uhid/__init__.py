@@ -199,6 +199,7 @@ class _UHIDBase(object):
         self.receive_start: Optional[Callable[[int], None]] = None
         self.receive_open: Optional[Callable[[], None]] = None
         self.receive_close: Optional[Callable[[], None]] = None
+        self.receive_output: Optional[Callable[[List[int], _ReportType], Optional[Awaitable[None]]]] = None
 
     def _receive_dispatch(self, buffer: bytes) -> Optional[Callable[[], Optional[Awaitable[None]]]]:
         event = _Event.from_buffer_copy(buffer)
@@ -217,7 +218,14 @@ class _UHIDBase(object):
             self.__logger.debug(f'device was closed (it now has {self._open_count} open instances)')
             if self.receive_close:
                 return functools.partial(self.receive_close)
-        # TODO: stop, output, get_report, set_report
+        elif event.type == _EventType.UHID_OUTPUT.value:
+            if self.receive_output:
+                return functools.partial(
+                    self.receive_output,
+                    list(event.u.output.data)[:event.u.output.size],
+                    _ReportType(event.u.output.rtype),
+                )
+        # TODO: stop, get_report, set_report
         return None
 
     def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
@@ -494,6 +502,14 @@ class _UHIDDeviceBase(object):
     @receive_close.setter
     def receive_close(self, callback: Optional[Callable[[], None]]) -> None:
         self._backend.receive_close = callback
+
+    @property
+    def receive_output(self) -> Optional[Callable[[List[int], _ReportType], Optional[Awaitable[None]]]]:
+        return self._backend.receive_output
+
+    @receive_output.setter
+    def receive_output(self, callback: Optional[Callable[[List[int], _ReportType], Optional[Awaitable[None]]]]) -> None:
+        self._backend.receive_output = callback
 
 
 class UHIDDevice(_UHIDDeviceBase):
