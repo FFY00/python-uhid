@@ -16,7 +16,7 @@ import time
 import typing
 import uuid
 
-from typing import Any, Awaitable, Callable, List, Optional, Sequence, Type, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Type, Union
 
 
 if typing.TYPE_CHECKING:
@@ -192,8 +192,9 @@ class _UHIDBase(object):
         self._created = False
         self._started = False
         self._open_count = 0
-        self._construct_event = {
+        self._construct_event: Dict[_EventType, Callable[..., _Event]] = {
             _EventType.UHID_CREATE2: self._create_event,
+            _EventType.UHID_DESTROY: self._destroy_event,
         }
 
         self.receive_start: Optional[Callable[[int], None]] = None
@@ -279,7 +280,11 @@ class _UHIDBase(object):
             ),
         )
 
-    # TODO: destroy, input2, get_report_reply, set_report_reply
+    def _destroy_event(self) -> _Event:
+        self._created = False
+        return self._event(_EventType.UHID_DESTROY)
+
+    # TODO: input2, get_report_reply, set_report_reply
 
     @property
     def started(self) -> bool:
@@ -584,6 +589,10 @@ class UHIDDevice(_UHIDDeviceBase):
         if isinstance(self._uhid, PolledBlockingUHID):
             self._uhid.single_dispatch()
 
+    def destroy(self) -> None:
+        self.__logger.info(f'(UHID_DESTROY) destroy {self}')
+        self._uhid.send_event(_EventType.UHID_DESTROY)
+
 
 class AsyncUHIDDevice(_UHIDDeviceBase):
     '''
@@ -660,3 +669,7 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
             self._country,
             self._rdesc,
         )
+
+    async def destroy(self) -> None:
+        self.__logger.info(f'(UHID_DESTROY) destroy {self}')
+        await self._uhid.send_event(_EventType.UHID_DESTROY)
