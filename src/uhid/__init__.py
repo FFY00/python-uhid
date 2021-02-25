@@ -262,7 +262,7 @@ class _BlockingUHIDBase(_UHIDBase):
         if n != ctypes.sizeof(event):  # pragma: no cover
             raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
 
-    def _read(self) -> None:
+    def single_dispatch(self) -> None:
         self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
 
     def _send_event(self, event: _Event) -> None:
@@ -277,12 +277,12 @@ class PolledBlockingUHID(_BlockingUHIDBase):
     Blocking IO UHID implementation using epoll
     '''
 
-    def poll_loop(self) -> None:
+    def dispatch(self) -> None:
         poller = select.epoll()
         poller.register(self._uhid, select.EPOLLIN)
         while True:
             for _fd, _event_type in poller.poll():
-                self._read()
+                self.single_dispatch()
 
 
 class AsyncioBlockingUHID(_BlockingUHIDBase):
@@ -302,7 +302,7 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
         self._write_queue: List[_Event] = []
 
         self._writer_registered = False
-        self._loop.add_reader(self._uhid, self._read)
+        self._loop.add_reader(self._uhid, self.single_dispatch)
 
     def _async_writer(self) -> None:
         self._write(self._write_queue.pop(0))
@@ -340,8 +340,12 @@ class TrioUHID(_UHIDBase):
     async def _write(self, event: _Event) -> None:
         await self._uhid.write(bytearray(event))
 
-    async def _read(self) -> None:
+    async def single_dispatch(self) -> None:
         self._receive_dispatch(await self._uhid.read(ctypes.sizeof(_Event)))
+
+    async def dispatch(self) -> None:
+        while True:
+            await self.single_dispatch()
 
     async def send_event(self, event_type: _EventType, *args: Any, **kwargs: Any) -> None:
         await self._write(self._construct_event[event_type](*args, **kwargs))
@@ -479,6 +483,13 @@ class UHIDDevice(_UHIDDeviceBase):
             self._rdesc,
         )
 
+    def dispatch(self) -> None:
+        if isinstance(self, PolledBlockingUHID):
+            self._uhid.dispatch()
+
+    def single_dispatch(self) -> None:
+        self._uhid.single_dispatch()
+
 
 class AsyncUHIDDevice(_UHIDDeviceBase):
     '''
@@ -532,6 +543,12 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
         '''
         self.__logger.info('initializing device')
         await self._create()
+
+    async def dispatch(self) -> None:
+        await self._uhid.dispatch()
+
+    async def single_dispatch(self) -> None:
+        await self._uhid.single_dispatch()
 
     async def _create(self) -> None:
         self.__logger.info(f'create {self}')
