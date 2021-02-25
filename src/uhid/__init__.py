@@ -271,7 +271,7 @@ class _BlockingUHIDBase(_UHIDBase):
         if n != ctypes.sizeof(event):  # pragma: no cover
             raise UHIDException(f'Failed to send data ({n} != {ctypes.sizeof(event)})')
 
-    def single_dispatch(self) -> None:
+    def _read(self) -> None:
         self._receive_dispatch(os.read(self._uhid, ctypes.sizeof(_Event)))
 
     def _send_event(self, event: _Event) -> None:
@@ -285,6 +285,9 @@ class PolledBlockingUHID(_BlockingUHIDBase):
     '''
     Blocking IO UHID implementation using epoll
     '''
+
+    def single_dispatch(self) -> None:
+        self._read()
 
     def dispatch(self) -> None:
         poller = select.epoll()
@@ -311,7 +314,7 @@ class AsyncioBlockingUHID(_BlockingUHIDBase):
         self._write_queue: List[_Event] = []
 
         self._writer_registered = False
-        self._loop.add_reader(self._uhid, self.single_dispatch)
+        self._loop.add_reader(self._uhid, self._read)
 
     def _async_writer(self) -> None:
         self._write(self._write_queue.pop(0))
@@ -494,15 +497,21 @@ class UHIDDevice(_UHIDDeviceBase):
 
     def wait_for_start(self, delay: float = 0.05) -> None:
         while not self._uhid.started:
-            self._uhid.single_dispatch()
+            self.single_dispatch()
             time.sleep(delay)
+
+    async def wait_for_start_asyncio(self, delay: float = 0.05) -> None:
+        while not self._uhid.started:
+            self.single_dispatch()
+            await asyncio.sleep(delay)
 
     def dispatch(self) -> None:
         if isinstance(self, PolledBlockingUHID):
             self._uhid.dispatch()
 
     def single_dispatch(self) -> None:
-        self._uhid.single_dispatch()
+        if isinstance(self, PolledBlockingUHID):
+            self._uhid.single_dispatch()
 
 
 class AsyncUHIDDevice(_UHIDDeviceBase):
