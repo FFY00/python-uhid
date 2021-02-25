@@ -567,7 +567,7 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
 
     async def wait_for_start(self, delay: float = 0.05) -> None:
         while not self._uhid.started:
-            await self._uhid.single_dispatch()
+            await self.single_dispatch()
 
     async def dispatch(self) -> None:
         await self._uhid.dispatch()
