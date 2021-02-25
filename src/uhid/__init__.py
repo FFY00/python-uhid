@@ -18,7 +18,7 @@ from typing import Any, Callable, List, Optional, Sequence, Type, Union
 
 
 if typing.TYPE_CHECKING:
-    import trio
+    import trio  # pragma: no cover
 
 
 __version__ = '0.0.0b1'
