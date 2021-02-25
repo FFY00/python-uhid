@@ -215,8 +215,6 @@ class _UHIDBase(object):
         if self._open:
             raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
 
-        self.__logger.info('UHID_CREATE2')
-
         if len(name) > _Create2Req.name.size:
             raise UHIDException(f'UHID_CREATE2: name is too big ({len(name) > _Create2Req.name.size})')
 
@@ -469,7 +467,7 @@ class UHIDDevice(_UHIDDeviceBase):
         self._create()
 
     def _create(self) -> None:
-        self.__logger.info(f'create {self}')
+        self.__logger.info(f'(UHID_CREATE2) create {self}')
         self._uhid.send_event(
             _EventType.UHID_CREATE2,
             self._name,
@@ -549,7 +547,7 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
         await self._uhid.single_dispatch()
 
     async def _create(self) -> None:
-        self.__logger.info(f'create {self}')
+        self.__logger.info(f'(UHID_CREATE2) create {self}')
         await self._uhid.send_event(
             _EventType.UHID_CREATE2,
             self._name,
