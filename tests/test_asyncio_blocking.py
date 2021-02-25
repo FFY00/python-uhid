@@ -24,13 +24,16 @@ async def test_create(basic_mouse_rdesc):
     assert device.version == 0
     assert device.country == 0
 
+    device.destroy()
+
 
 @pytest.fixture()
 @pytest.mark.asyncio
 async def vendor_device(vendor_rdesc):
     device = uhid.UHIDDevice(0x4321, 0x1234, 'Dummy Mouse', vendor_rdesc, backend=uhid.AsyncioBlockingUHID)
     await device.wait_for_start_asyncio()
-    return device
+    yield device
+    device.destroy()
 
 
 @pytest.fixture()

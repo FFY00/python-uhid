@@ -17,3 +17,5 @@ def test_create(basic_mouse_rdesc):
     assert hidraw.report_descriptor == device.report_descriptor == basic_mouse_rdesc
     assert device.version == 0
     assert device.country == 0
+
+    device.destroy()
