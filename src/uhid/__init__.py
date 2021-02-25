@@ -186,7 +186,7 @@ class _UHIDBase(object):
             raise RuntimeError('UHID is not available (/dev/uhid is missing)')
 
         self.__logger = logging.getLogger(self.__class__.__name__)
-        self._open = False
+        self._created = False
         self._started = False
         self._construct_event = {
             _EventType.UHID_CREATE2: self._create_event,
@@ -218,9 +218,9 @@ class _UHIDBase(object):
         country: int,
         rd_data: Sequence[int],
     ) -> _Event:
-        if self._open:
+        if self._created:
             raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
-        self._open = True
+        self._created = True
 
         if len(name) > _Create2Req.name.size:
             raise UHIDException(f'UHID_CREATE2: name is too big ({len(name) > _Create2Req.name.size})')
