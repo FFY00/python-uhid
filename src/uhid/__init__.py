@@ -426,21 +426,9 @@ class _UHIDDeviceBase(object):
         self.__logger = logging.getLogger(self.__class__.__name__)
 
         self._backend = uhid_backend
-        self._backend.receive_start = self.receive_start
-        self._backend.receive_open = self.receive_open
-        self._backend.receive_close = self.receive_close
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
-
-    def receive_start(self, dev_flags: int) -> None:
-        pass
-
-    def receive_open(self) -> None:
-        pass
-
-    def receive_close(self) -> None:
-        pass
 
     @property
     def bus(self) -> Bus:
@@ -480,6 +468,32 @@ class _UHIDDeviceBase(object):
     @property
     def country(self) -> int:
         return self._country
+
+    # callbacks
+
+    @property
+    def receive_start(self) -> Optional[Callable[[int], None]]:
+        return self._backend.receive_start
+
+    @receive_start.setter
+    def receive_start(self, callback: Optional[Callable[[int], None]]) -> None:
+        self._backend.receive_start = callback
+
+    @property
+    def receive_open(self) -> Optional[Callable[[], None]]:
+        return self._backend.receive_open
+
+    @receive_open.setter
+    def receive_open(self, callback: Optional[Callable[[], None]]) -> None:
+        self._backend.receive_open = callback
+
+    @property
+    def receive_close(self) -> Optional[Callable[[], None]]:
+        return self._backend.receive_close
+
+    @receive_close.setter
+    def receive_close(self, callback: Optional[Callable[[], None]]) -> None:
+        self._backend.receive_close = callback
 
 
 class UHIDDevice(_UHIDDeviceBase):
