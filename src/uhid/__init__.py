@@ -165,8 +165,6 @@ class _Event(ctypes.Structure):
         ('u', _U),
     ]
 
-# _CreateReq, _InputReq, _OutputEvReq, _FeatureReq, _FeatureAnswerReq
-
 
 class UHIDException(Exception):
     '''
