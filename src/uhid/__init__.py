@@ -21,6 +21,9 @@ if typing.TYPE_CHECKING:
     import trio
 
 
+__version__ = '0.0.0b1'
+
+
 _HID_MAX_DESCRIPTOR_SIZE = 4096
 _UHID_DATA_MAX = 4096
 
