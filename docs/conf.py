@@ -63,3 +63,7 @@ html_title = f'uhid {version}'
 # html_static_path = ['_static']
 
 autoclass_content = 'both'
+
+# -- Plugin options ----------------------------------------------------------
+
+set_type_checking_flag = True
