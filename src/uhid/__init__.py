@@ -220,6 +220,7 @@ class _UHIDBase(object):
     ) -> _Event:
         if self._open:
             raise UHIDException('This instance already has a device open, it is only possible to open 1 device per instance')
+        self._open = True
 
         if len(name) > _Create2Req.name.size:
             raise UHIDException(f'UHID_CREATE2: name is too big ({len(name) > _Create2Req.name.size})')
