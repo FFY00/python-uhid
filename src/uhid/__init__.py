@@ -212,6 +212,7 @@ class _UHIDBase(object):
             self.__logger.debug(f'device was closed (it now has {self._open_count} open instances)')
             if self.receive_close:
                 self.receive_close()
+        # TODO: stop, output, get_report, set_report
 
     def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
         data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
@@ -260,6 +261,8 @@ class _UHIDBase(object):
                 (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
             ),
         )
+
+    # TODO: destroy, input2, get_report_reply, set_report_reply
 
     @property
     def started(self) -> bool:
