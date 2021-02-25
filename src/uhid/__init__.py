@@ -574,11 +574,11 @@ class UHIDDevice(_UHIDDeviceBase):
             await asyncio.sleep(delay)
 
     def dispatch(self) -> None:
-        if isinstance(self, PolledBlockingUHID):
+        if isinstance(self._uhid, PolledBlockingUHID):
             self._uhid.dispatch()
 
     def single_dispatch(self) -> None:
-        if isinstance(self, PolledBlockingUHID):
+        if isinstance(self._uhid, PolledBlockingUHID):
             self._uhid.single_dispatch()
 
 
