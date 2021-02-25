@@ -10,6 +10,7 @@ import logging
 import os
 import os.path
 import select
+import time
 import typing
 import uuid
 
@@ -185,16 +186,21 @@ class _UHIDBase(object):
             raise RuntimeError('UHID is not available (/dev/uhid is missing)')
 
         self.__logger = logging.getLogger(self.__class__.__name__)
-        self.receive: Optional[Callable[[_Event], None]] = None
         self._open = False
+        self._started = False
         self._construct_event = {
             _EventType.UHID_CREATE2: self._create_event,
         }
 
+        self.receive_start: Optional[Callable[[int], None]] = None
+
     def _receive_dispatch(self, buffer: bytes) -> None:
-        if self.receive:
-            self.receive(_Event.from_buffer_copy(buffer))
-            # TODO: set self._open
+        event = _Event.from_buffer_copy(buffer)
+        if event.type == _EventType.UHID_START.value:
+            self.__logger.debug('device started')
+            self._started = True
+            if self.receive_start:
+                self.receive_start(event.u.start.dev_flags)
 
     def _event(self, event_type: _EventType, event_data: ctypes.Structure) -> _Event:
         data_union = _U(**{event_type.name.strip('UHID_').lower(): event_data})
@@ -242,6 +248,10 @@ class _UHIDBase(object):
                 (ctypes.c_uint8 * _HID_MAX_DESCRIPTOR_SIZE)(*rd_data)
             ),
         )
+
+    @property
+    def started(self) -> bool:
+        return self._started
 
 
 class _BlockingUHIDBase(_UHIDBase):
@@ -382,13 +392,13 @@ class _UHIDDeviceBase(object):
         self.__logger = logging.getLogger(self.__class__.__name__)
 
         self._backend = uhid_backend
-        self._backend.receive = self._receive
+        self._backend.receive_start = self.receive_start
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(vid={self.vid}, pid={self.pid}, name={self.name}, uniq={self.unique_name})'
 
-    def _receive(self, event: _Event) -> None:
-        self.__logger.debug(f'received {event}')
+    def receive_start(self, dev_flags: int) -> None:
+        pass
 
     @property
     def bus(self) -> Bus:
@@ -481,6 +491,11 @@ class UHIDDevice(_UHIDDeviceBase):
             self._rdesc,
         )
 
+    def wait_for_start(self, delay: float = 0.05) -> None:
+        while not self._uhid.started:
+            self._uhid.single_dispatch()
+            time.sleep(delay)
+
     def dispatch(self) -> None:
         if isinstance(self, PolledBlockingUHID):
             self._uhid.dispatch()
@@ -539,6 +554,10 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
         '''
         self.__logger.info('initializing device')
         await self._create()
+
+    async def wait_for_start(self, delay: float = 0.05) -> None:
+        while not self._uhid.started:
+            await self._uhid.single_dispatch()
 
     async def dispatch(self) -> None:
         await self._uhid.dispatch()
