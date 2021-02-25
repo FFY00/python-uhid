@@ -198,6 +198,7 @@ class _UHIDBase(object):
         self._construct_event: Dict[_EventType, Callable[..., bytes]] = {
             _EventType.UHID_CREATE2: self._create_event,
             _EventType.UHID_DESTROY: self._destroy_event,
+            _EventType.UHID_INPUT2: self._input2_event,
         }
 
         self.receive_start: Optional[Callable[[int], None]] = None
@@ -285,7 +286,18 @@ class _UHIDBase(object):
         self._created = False
         return struct.pack('< L', _EventType.UHID_DESTROY.value)
 
-    # TODO: input2, get_report_reply, set_report_reply
+    def _input2_event(self, data: Sequence[int]) -> bytes:
+        if len(data) > _Input2Req.data.size:
+            raise UHIDException(f'UHID_INPUT2: data is too big ({len(data) > _Input2Req.data.size})')
+
+        return struct.pack(
+            '< L H 4096s',
+            _EventType.UHID_INPUT2.value,
+            len(data),
+            bytes(data),
+        )
+
+    # TODO: get_report_reply, set_report_reply
 
     @property
     def started(self) -> bool:
@@ -594,6 +606,13 @@ class UHIDDevice(_UHIDDeviceBase):
         self.__logger.info(f'(UHID_DESTROY) destroy {self}')
         self._uhid.send_event(_EventType.UHID_DESTROY)
 
+    def send_input(self, data: Sequence[int]) -> None:
+        if self.__logger.level <= logging.INFO:
+            self.__logger.info('(UHID_INPUT2) send {}'.format(
+                ''.join([f'{byte:02x}' for byte in data])
+            ))
+        self._uhid.send_event(_EventType.UHID_INPUT2, data)
+
 
 class AsyncUHIDDevice(_UHIDDeviceBase):
     '''
@@ -674,3 +693,10 @@ class AsyncUHIDDevice(_UHIDDeviceBase):
     async def destroy(self) -> None:
         self.__logger.info(f'(UHID_DESTROY) destroy {self}')
         await self._uhid.send_event(_EventType.UHID_DESTROY)
+
+    async def send_input(self, data: Sequence[int]) -> None:
+        if self.__logger.level <= logging.INFO:
+            self.__logger.info('(UHID_INPUT2) send {}'.format(
+                ''.join([f'{byte:02x}' for byte in data])
+            ))
+        await self._uhid.send_event(_EventType.UHID_INPUT2, data)
